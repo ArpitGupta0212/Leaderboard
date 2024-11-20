@@ -6,7 +6,33 @@ const app = express();
 const port = 3001;
 
 app.use(cors());
+const recentSub = `
+  query recentAcSubmissions($username: String!, $limit: Int!) {
+    recentAcSubmissionList(username: $username, limit: $limit) {
+      id
+      title
+      timestamp
+      statusDisplay
+      runtime
+      memory
+      lang
+    }
+  }
+`;
 
+async function fetchLeet(username) {
+  const graphqlUrl = "https://leetcode.com/graphql";
+  const recentSubmissions = await axios.post(graphqlUrl, {
+    query: recentSub,
+    variables: {
+      username,
+      limit: 5,  
+    },
+  });
+  return {
+    recentSubmissions: recentSubmissions.data.data.recentAcSubmissionList || [],
+  };
+}
 async function fetchAndSaveData() {
   try {
     console.log('Starting to read input files...');
@@ -14,7 +40,7 @@ async function fetchAndSaveData() {
     const names = fs.readFileSync('name.txt', 'utf-8').split('\n').map(line => line.trim()).filter(Boolean);
     const urls = fs.readFileSync('urls.txt', 'utf-8').split('\n').map(line => line.trim()).filter(Boolean);
     const sections = fs.readFileSync('sections.txt', 'utf-8').split('\n').map(line => line.trim()).filter(Boolean);
-
+    const day = fs.readFileSync('day.txt','utf-8').split('\n').map(line=>line.trim()).filter(Boolean);
     if (rolls.length !== names.length || names.length !== urls.length || names.length !== sections.length) {
       console.error('Error: The number of rolls, names, URLs, and sections do not match.');
       return;
@@ -22,15 +48,15 @@ async function fetchAndSaveData() {
 
     console.log('Input files read successfully.');
     const combinedData = [];
-
-    for (let i = 0; i < rolls.length; i++) {
+    async function processStudentData(i){
       const roll = rolls[i];
       const name = names[i];
       const url = urls[i];
       const section = sections[i];
-      let studentData = { roll, name, url, section };
+      const dayi = day[i];
+      let studentData = { roll, name, url, section,dayi };
 
-      console.log(`Processing data for roll number: ${roll}, name: ${name}, section: ${section}`);
+      console.log(`Processing data for roll number: ${roll}, name: ${name}, section: ${section}, day: ${dayi}`);
 
       // Check if URL is a LeetCode URL
       if (url.startsWith('https://leetcode.com/u/')) {
@@ -54,6 +80,10 @@ async function fetchAndSaveData() {
           } else {
             console.log(`No data found for ${username}`);
           }
+
+          const recent = await fetchLeet(username);
+          studentData.recent = recent;
+          
         } catch (error) {
           console.error(`Error fetching data for ${username}:`, error);
         }
@@ -64,6 +94,11 @@ async function fetchAndSaveData() {
       combinedData.push(studentData);
     }
 
+    const promises = [];
+    for (let i = 0; i < rolls.length; i++) {
+      promises.push(processStudentData(i));
+    }
+    await Promise.all(promises);
     // Sort the data by totalSolved in descending order, treating 'NA' or invalid values as 0
     combinedData.sort((a, b) => {
       const aTotalSolved = isNaN(a.totalSolved) ? 0 : a.totalSolved;
@@ -78,6 +113,7 @@ async function fetchAndSaveData() {
   }
 }
 
+
 app.get('/data', (req, res) => {
   res.sendFile(__dirname + '/data.json');
 });
@@ -89,3 +125,4 @@ setInterval(fetchAndSaveData, 60 * 60 * 1000);
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
 });
+
